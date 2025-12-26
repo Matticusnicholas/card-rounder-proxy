@@ -188,9 +188,6 @@ class SilhouetteSVGGenerator:
             stroke_width="0.1mm"
         )
 
-        # Add Silhouette-specific attributes for cut settings
-        path.attribs['data-cut-type'] = 'cut'
-
         return path
 
     def _rounded_rect_path(
