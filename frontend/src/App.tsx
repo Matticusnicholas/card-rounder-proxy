@@ -8,18 +8,26 @@ interface Card {
   height: number
 }
 
+interface SourceInfo {
+  is_pdf: boolean
+  page_count: number
+  current_page: number
+}
+
 interface ProcessResult {
   success: boolean
   cards_detected: number
   cards: Card[]
   processed_image: string
   svg_cut_file: string
+  pdf_print_file: string
   image_dimensions: {
     width_px: number
     height_px: number
     width_mm: number
     height_mm: number
   }
+  source_info: SourceInfo
 }
 
 interface PreviewResult {
@@ -27,6 +35,7 @@ interface PreviewResult {
   cards_detected: number
   cards: Card[]
   preview_image: string
+  source_info: SourceInfo
 }
 
 type ProcessingStep = 'idle' | 'uploading' | 'detecting' | 'processing' | 'done' | 'error'
@@ -38,28 +47,40 @@ export default function App() {
   const [processedResult, setProcessedResult] = useState<ProcessResult | null>(null)
   const [step, setStep] = useState<ProcessingStep>('idle')
   const [error, setError] = useState<string | null>(null)
+  const [sourceInfo, setSourceInfo] = useState<SourceInfo | null>(null)
 
   // Settings
   const [gridCols, setGridCols] = useState(3)
   const [gridRows, setGridRows] = useState(3)
   const [autoDetect, setAutoDetect] = useState(true)
   const [dpi, setDpi] = useState(300)
+  const [pageSize, setPageSize] = useState<'letter' | 'a4'>('letter')
+  const [currentPage, setCurrentPage] = useState(1)
 
   const fileInputRef = useRef<HTMLInputElement>(null)
 
+  const isPdf = (f: File) => f.type === 'application/pdf'
+
   const handleFileSelect = useCallback((selectedFile: File) => {
     setFile(selectedFile)
-    setPreviewUrl(URL.createObjectURL(selectedFile))
+    // Only create object URL preview for images, not PDFs
+    if (!selectedFile.type.startsWith('application/pdf')) {
+      setPreviewUrl(URL.createObjectURL(selectedFile))
+    } else {
+      setPreviewUrl(null)
+    }
     setDetectionPreview(null)
     setProcessedResult(null)
     setStep('idle')
     setError(null)
+    setSourceInfo(null)
+    setCurrentPage(1)
   }, [])
 
   const handleDrop = useCallback((e: React.DragEvent) => {
     e.preventDefault()
     const droppedFile = e.dataTransfer.files[0]
-    if (droppedFile && droppedFile.type.startsWith('image/')) {
+    if (droppedFile && (droppedFile.type.startsWith('image/') || droppedFile.type === 'application/pdf')) {
       handleFileSelect(droppedFile)
     }
   }, [handleFileSelect])
@@ -86,7 +107,7 @@ export default function App() {
 
     try {
       const response = await fetch(
-        `/api/preview?grid_cols=${gridCols}&grid_rows=${gridRows}&auto_detect=${autoDetect}&dpi=${dpi}`,
+        `/api/preview?grid_cols=${gridCols}&grid_rows=${gridRows}&auto_detect=${autoDetect}&dpi=${dpi}&page=${currentPage}`,
         {
           method: 'POST',
           body: formData,
@@ -100,6 +121,7 @@ export default function App() {
 
       const result: PreviewResult = await response.json()
       setDetectionPreview(result.preview_image)
+      setSourceInfo(result.source_info)
       setStep('idle')
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Preview failed')
@@ -118,7 +140,7 @@ export default function App() {
 
     try {
       const response = await fetch(
-        `/api/process?grid_cols=${gridCols}&grid_rows=${gridRows}&auto_detect=${autoDetect}&dpi=${dpi}`,
+        `/api/process?grid_cols=${gridCols}&grid_rows=${gridRows}&auto_detect=${autoDetect}&dpi=${dpi}&page_size=${pageSize}&page=${currentPage}`,
         {
           method: 'POST',
           body: formData,
@@ -132,6 +154,7 @@ export default function App() {
 
       const result: ProcessResult = await response.json()
       setProcessedResult(result)
+      setSourceInfo(result.source_info)
       setStep('done')
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Processing failed')
@@ -160,6 +183,15 @@ export default function App() {
     URL.revokeObjectURL(url)
   }
 
+  const downloadPDF = () => {
+    if (!processedResult) return
+
+    const link = document.createElement('a')
+    link.href = processedResult.pdf_print_file
+    link.download = 'mtg-proxies-print.pdf'
+    link.click()
+  }
+
   const resetAll = () => {
     setFile(null)
     setPreviewUrl(null)
@@ -167,6 +199,8 @@ export default function App() {
     setProcessedResult(null)
     setStep('idle')
     setError(null)
+    setSourceInfo(null)
+    setCurrentPage(1)
     if (fileInputRef.current) {
       fileInputRef.current.value = ''
     }
@@ -199,7 +233,7 @@ export default function App() {
               <input
                 ref={fileInputRef}
                 type="file"
-                accept="image/*"
+                accept="image/*,.pdf,application/pdf"
                 onChange={handleFileInputChange}
                 className="hidden"
               />
@@ -209,18 +243,46 @@ export default function App() {
                     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
                   </svg>
                   <p className="text-green-400 font-medium">{file.name}</p>
-                  <p className="text-gray-500 text-sm mt-1">Click to change</p>
+                  <p className="text-gray-500 text-sm mt-1">
+                    {isPdf(file) ? 'PDF Document' : 'Image'} - Click to change
+                  </p>
                 </div>
               ) : (
                 <div>
                   <svg className="w-12 h-12 mx-auto mb-3 text-gray-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z" />
                   </svg>
-                  <p className="text-gray-400">Drop your card sheet image here</p>
-                  <p className="text-gray-500 text-sm mt-1">or click to browse</p>
+                  <p className="text-gray-400">Drop your card sheet here</p>
+                  <p className="text-gray-500 text-sm mt-1">Images or PDF files</p>
                 </div>
               )}
             </div>
+
+            {/* PDF Page Selector */}
+            {file && isPdf(file) && sourceInfo && sourceInfo.page_count > 1 && (
+              <div className="bg-gray-800 rounded-lg p-4">
+                <label className="text-gray-300 text-sm">PDF Page</label>
+                <div className="flex items-center gap-2 mt-2">
+                  <button
+                    onClick={() => setCurrentPage(Math.max(1, currentPage - 1))}
+                    disabled={currentPage <= 1}
+                    className="px-3 py-1 bg-gray-700 hover:bg-gray-600 disabled:opacity-50 rounded"
+                  >
+                    &lt;
+                  </button>
+                  <span className="text-white">
+                    Page {currentPage} of {sourceInfo.page_count}
+                  </span>
+                  <button
+                    onClick={() => setCurrentPage(Math.min(sourceInfo.page_count, currentPage + 1))}
+                    disabled={currentPage >= sourceInfo.page_count}
+                    className="px-3 py-1 bg-gray-700 hover:bg-gray-600 disabled:opacity-50 rounded"
+                  >
+                    &gt;
+                  </button>
+                </div>
+              </div>
+            )}
 
             {/* Settings Panel */}
             <div className="bg-gray-800 rounded-lg p-6">
@@ -283,6 +345,19 @@ export default function App() {
                     <option value="600">600 DPI</option>
                   </select>
                 </div>
+
+                {/* Page Size Setting */}
+                <div>
+                  <label className="text-gray-300 text-sm">Output Page Size</label>
+                  <select
+                    value={pageSize}
+                    onChange={(e) => setPageSize(e.target.value as 'letter' | 'a4')}
+                    className="w-full mt-1 px-3 py-2 bg-gray-700 border border-gray-600 rounded text-white"
+                  >
+                    <option value="letter">Letter (8.5" × 11")</option>
+                    <option value="a4">A4 (210mm × 297mm)</option>
+                  </select>
+                </div>
               </div>
             </div>
 
@@ -303,7 +378,7 @@ export default function App() {
                 className="w-full py-3 px-4 bg-blue-600 hover:bg-blue-500 disabled:bg-gray-800 disabled:text-gray-500
                   text-white rounded-lg font-medium transition-colors"
               >
-                {step === 'processing' ? 'Processing...' : 'Process & Generate Cut File'}
+                {step === 'processing' ? 'Processing...' : 'Process & Generate Files'}
               </button>
 
               {(processedResult || detectionPreview) && (
@@ -333,7 +408,9 @@ export default function App() {
 
               {!previewUrl && !detectionPreview && !processedResult && (
                 <div className="aspect-video bg-gray-700 rounded-lg flex items-center justify-center">
-                  <p className="text-gray-500">Upload an image to see preview</p>
+                  <p className="text-gray-500">
+                    {file && isPdf(file) ? 'Click "Preview Detection" to see PDF contents' : 'Upload an image or PDF to see preview'}
+                  </p>
                 </div>
               )}
 
@@ -403,27 +480,43 @@ export default function App() {
                         <p className="text-white font-medium">3mm (MTG Standard)</p>
                       </div>
                     </div>
+                    {processedResult.source_info.is_pdf && (
+                      <div className="mt-2 pt-2 border-t border-gray-600">
+                        <span className="text-gray-400 text-sm">
+                          Source: PDF page {processedResult.source_info.current_page} of {processedResult.source_info.page_count}
+                        </span>
+                      </div>
+                    )}
                   </div>
 
                   {/* Download Buttons */}
-                  <div className="flex gap-4">
+                  <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
                     <button
-                      onClick={downloadProcessedImage}
-                      className="flex-1 py-3 px-4 bg-green-600 hover:bg-green-500 text-white rounded-lg font-medium transition-colors flex items-center justify-center gap-2"
+                      onClick={downloadPDF}
+                      className="py-3 px-4 bg-red-600 hover:bg-red-500 text-white rounded-lg font-medium transition-colors flex items-center justify-center gap-2"
                     >
                       <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                         <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
                       </svg>
-                      Download Print Image (PNG)
+                      Print PDF
+                    </button>
+                    <button
+                      onClick={downloadProcessedImage}
+                      className="py-3 px-4 bg-green-600 hover:bg-green-500 text-white rounded-lg font-medium transition-colors flex items-center justify-center gap-2"
+                    >
+                      <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
+                      </svg>
+                      PNG Image
                     </button>
                     <button
                       onClick={downloadSVG}
-                      className="flex-1 py-3 px-4 bg-purple-600 hover:bg-purple-500 text-white rounded-lg font-medium transition-colors flex items-center justify-center gap-2"
+                      className="py-3 px-4 bg-purple-600 hover:bg-purple-500 text-white rounded-lg font-medium transition-colors flex items-center justify-center gap-2"
                     >
                       <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                         <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
                       </svg>
-                      Download Cut File (SVG)
+                      SVG Cut File
                     </button>
                   </div>
                 </div>
@@ -434,19 +527,20 @@ export default function App() {
             <div className="bg-gray-800 rounded-lg p-6">
               <h2 className="text-lg font-semibold mb-4 text-white">How to Use</h2>
               <ol className="list-decimal list-inside space-y-2 text-gray-300">
-                <li>Upload your MTG proxy card sheet image (3×3 or other grid)</li>
+                <li>Upload your MTG proxy card sheet (image or PDF)</li>
                 <li>Click "Preview Detection" to verify card boundaries are correct</li>
                 <li>If auto-detection fails, disable it and set grid size manually</li>
-                <li>Click "Process & Generate Cut File" to create outputs</li>
-                <li>Download the PNG image for printing</li>
-                <li>Download the SVG cut file and import into Silhouette Studio</li>
+                <li>Click "Process & Generate Files" to create outputs</li>
+                <li>Download the <strong>Print PDF</strong> for printing (includes registration marks)</li>
+                <li>Download the <strong>SVG Cut File</strong> and import into Silhouette Studio</li>
                 <li>Use print-and-cut workflow with registration marks</li>
               </ol>
 
               <div className="mt-4 p-4 bg-gray-700 rounded-lg">
                 <h3 className="font-medium text-yellow-400 mb-2">Silhouette Studio Tips</h3>
                 <ul className="list-disc list-inside space-y-1 text-gray-300 text-sm">
-                  <li>Import the SVG file first, then place the printed sheet</li>
+                  <li>Print the PDF - it includes registration marks for alignment</li>
+                  <li>Import the SVG cut file into Silhouette Studio</li>
                   <li>Enable registration mark detection in cut settings</li>
                   <li>Use "Print and Cut" preset for best results</li>
                   <li>Test with a single sheet before batch cutting</li>
