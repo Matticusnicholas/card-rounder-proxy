@@ -64,9 +64,6 @@ class SilhouetteSVGGenerator:
             viewBox=f"0 0 {self.image_width_mm} {self.image_height_mm}"
         )
 
-        # Add metadata for Silhouette software
-        dwg.attribs['xmlns:silhouette'] = 'http://www.silhouetteamerica.com/silhouette'
-
         # Create groups for organization
         reg_marks_group = dwg.g(id="registration-marks")
         cut_paths_group = dwg.g(id="cut-paths")
